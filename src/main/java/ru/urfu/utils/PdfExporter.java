@@ -4,31 +4,35 @@ import com.itextpdf.text.Document;
 import com.itextpdf.text.DocumentException;
 import com.itextpdf.text.Paragraph;
 import com.itextpdf.text.pdf.PdfWriter;
+import org.springframework.stereotype.Component;
 
 import java.io.FileOutputStream;
+import java.nio.file.Path;
 
 /**
- * Экспортёр текста в PDF.
+ * Экспортёр документов в PDF.
  */
-public class PdfExporter {
-    /**
-     * Экспортирует содержимое в PDF файл.
-     *
-     * @param outputPath путь для сохранения pdf файла
-     * @param content    текстовое содержимое
-     * @throws DocumentException   если произошла ошибка PDF генерации
-     * @throws java.io.IOException если не удалось записать файл
-     */
-    public static void export(String outputPath, String content)
+@Component
+public class PdfExporter implements Exporter {
+    @Override
+    public Path export(Path outputDir, ru.urfu.document.Document document)
             throws DocumentException, java.io.IOException {
-
-        try (FileOutputStream outputStream = new FileOutputStream(outputPath)) {
+        Path outputPath = outputDir.resolve(document.name()
+                + "." + getSupportableFormat());
+        try (FileOutputStream outputStream =
+                     new FileOutputStream(outputPath.toString())) {
             Document pdf = new Document();
             PdfWriter.getInstance(pdf, outputStream);
 
             pdf.open();
-            pdf.add(new Paragraph(content));
+            pdf.add(new Paragraph(document.content()));
             pdf.close();
         }
+        return outputPath;
+    }
+
+    @Override
+    public String getSupportableFormat() {
+        return "pdf";
     }
 }

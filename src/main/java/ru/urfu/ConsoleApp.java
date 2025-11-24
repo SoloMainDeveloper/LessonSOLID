@@ -7,31 +7,56 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.beans.factory.annotation.Autowired;
 import ru.urfu.document.Document;
 import ru.urfu.document.DocumentService;
-import ru.urfu.utils.PdfExporter;
+import ru.urfu.utils.Exporter;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Scanner;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Основной класс консольного приложения.
  * Реализует ввод команд и взаимодействие с сервисами.
+ * Для добавления нового формата экспорта необходимо совершить 1 изменение:
+ * Создать класс, имплементирующий интерфейс {@link Exporter}, реализовать его
+ * методы и аннотировать класс как @Component
  */
 @SpringBootApplication
 public class ConsoleApp implements CommandLineRunner {
+    /**
+     * Директория для экспортируемых файлов
+     */
+    public static final Path OUTPUT_DIR = Path.of(
+            System.getProperty("user.home"), "lessonSOLID");
 
-    public static final Path OUTPUT_DIR = Path.of(System.getProperty("user.home"), "lessonSOLID");
-
+    /**
+     * Сервис для управления документами
+     */
     private final DocumentService documentService;
 
+    /**
+     * Сканер консольного ввода
+     */
     private final Scanner scanner = new Scanner(System.in);
 
+    /**
+     * Экспортёры файлов
+     */
+    private final Map<String, Exporter> exporters;
+
     @Autowired
-    public ConsoleApp(DocumentService documentService) {
+    public ConsoleApp(DocumentService documentService, List<Exporter> exporters) {
         this.documentService = documentService;
+        this.exporters = exporters.stream()
+                .collect(Collectors.toMap(
+                        Exporter::getSupportableFormat,
+                        Function.identity()
+                ));
     }
 
     /**
@@ -55,7 +80,7 @@ public class ConsoleApp implements CommandLineRunner {
             switch (cmd) {
                 case "create" -> createDocument();
                 case "import" -> importDocument();
-                case "list" -> listDocuments();
+                case "list" -> printListDocuments();
                 case "export" -> exportDocument();
                 case "exit" -> {
                     return;
@@ -79,47 +104,57 @@ public class ConsoleApp implements CommandLineRunner {
         StringBuilder content = new StringBuilder();
         while (true) {
             String line = scanner.nextLine();
-            if (line.isEmpty()) break; // окончание ввода
+            if (line.isEmpty()) {
+                break; // окончание ввода
+            }
             content.append(line).append(System.lineSeparator());
         }
 
-        documentService.createDocument(name, content.toString());
-
+        documentService.saveDocument(new Document(name, content.toString()));
         System.out.println("Документ создан и сохранён в памяти.");
     }
 
     /**
-     * Выполняет импорт документа.
+     * Выполняет импорт документа. Для этого запрашивает у пользователя путь к файлу
      */
     private void importDocument() {
         System.out.print("Введите путь к txt файлу: ");
-        String path = scanner.nextLine();
+        String pathStr = scanner.nextLine();
+        Path path = Path.of(pathStr);
 
         try {
             documentService.importTxt(path);
+            System.out.println("Документ импортирован: " + path.getFileName());
         } catch (IOException e) {
             System.out.println("Ошибка импорта: " + e.getMessage());
         }
     }
 
     /**
-     * Выполняет импорт документа.
+     * Выводит в консоль список документов
+     * <p>Логическая ошибки: неправильное наименование метода и JavaDOC</p>
      */
-    private void listDocuments() {
-        List<Document> documents = documentService.list();
+    private void printListDocuments() {
+        List<Document> documents = documentService.getDocumentList();
         if (documents.isEmpty()) {
             System.out.println("Документов нет");
             return;
         }
-        int i = 0;
-        for (Document doc : documents) {
+        for (int i = 0; i < documents.size(); i++) {
+            Document doc = documents.get(i);
             System.out.println(i + ": " + doc.name());
-            i++;
         }
     }
 
     /**
-     * Выполняет импорт документа.
+     * Выполняет экспорт документа в выходную директорию. Для этого запрашивает у
+     * пользователя номер документа и желаемый формат экспорта.
+     * <p>Логическая ошибки</p>
+     * <li>Неправильный JavaDOC</li>
+     * <li>Жёсткая завязка на реализацию - нарушение DIP - применяем интерфейс в
+     * точке расширения, тем самым соблюдая OCP</li>
+     * <li>Размазанная ответственность - лишь метод экспорта на 100% знает, куда он
+     * экспортировал файл</li>
      */
     private void exportDocument() {
         System.out.print("Введите номер документа: ");
@@ -131,9 +166,8 @@ public class ConsoleApp implements CommandLineRunner {
             return;
         }
 
-        Document document = documentOptional.get();
-
-        System.out.print("Введите формат (txt/pdf): ");
+        String supportableFormats = String.join("/", exporters.keySet());
+        System.out.printf("Введите формат (%s):", supportableFormats);
         String format = scanner.nextLine().trim().toLowerCase();
 
         try {
@@ -143,18 +177,14 @@ public class ConsoleApp implements CommandLineRunner {
             return;
         }
 
-        Path outputPath = OUTPUT_DIR.resolve(document.name() + "." + format);
-
+        Document document = documentOptional.get();
         try {
-            switch (format) {
-                case "txt" -> Files.writeString(outputPath, document.content());
-                case "pdf" -> PdfExporter.export(outputPath.toString(), document.content());
-                default -> {
-                    System.out.println("Неверный формат");
-                    return;
-                }
+            Exporter exporter = exporters.get(format);
+            if(exporter == null) {
+                System.out.println("Неверный формат");
+                return;
             }
-
+            Path outputPath = exporter.export(OUTPUT_DIR, document);
             System.out.println("Экспорт выполнен: " + outputPath);
         } catch (IOException | DocumentException e) {
             System.out.println("Ошибка экспорта: " + e.getMessage());
