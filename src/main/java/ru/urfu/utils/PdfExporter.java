@@ -7,6 +7,7 @@ import com.itextpdf.text.pdf.PdfWriter;
 import org.springframework.stereotype.Component;
 
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.file.Path;
 
 /**
@@ -15,10 +16,9 @@ import java.nio.file.Path;
 @Component
 public class PdfExporter implements Exporter {
     @Override
-    public Path export(Path outputDir, ru.urfu.document.Document document)
-            throws DocumentException, java.io.IOException {
-        Path outputPath = outputDir.resolve(document.name()
-                + "." + getSupportableFormat());
+    public void export(Path outputPath, ru.urfu.document.Document document)
+            throws java.io.IOException {
+
         try (FileOutputStream outputStream =
                      new FileOutputStream(outputPath.toString())) {
             Document pdf = new Document();
@@ -27,8 +27,9 @@ public class PdfExporter implements Exporter {
             pdf.open();
             pdf.add(new Paragraph(document.content()));
             pdf.close();
+        } catch (DocumentException e) {
+            throw new IOException("Ошибка генерации PDF", e);
         }
-        return outputPath;
     }
 
     @Override

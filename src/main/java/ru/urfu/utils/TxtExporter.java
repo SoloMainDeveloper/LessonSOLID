@@ -13,11 +13,8 @@ import java.nio.file.Path;
 @Component
 public class TxtExporter implements Exporter {
     @Override
-    public Path export(Path outputDir, Document document) throws IOException {
-        Path outputPath = outputDir.resolve(document.name()
-                + "." + getSupportableFormat());
+    public void export(Path outputPath, Document document) throws IOException {
         Files.writeString(outputPath, document.content());
-        return outputPath;
     }
 
     @Override

@@ -1,23 +1,22 @@
 package ru.urfu;
 
-import com.itextpdf.text.DocumentException;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.beans.factory.annotation.Autowired;
 import ru.urfu.document.Document;
 import ru.urfu.document.DocumentService;
+import ru.urfu.utils.ExportService;
 import ru.urfu.utils.Exporter;
+import ru.urfu.utils.ImportService;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.rmi.server.ExportException;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Scanner;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.Set;
 
 /**
  * Основной класс консольного приложения.
@@ -25,19 +24,40 @@ import java.util.stream.Collectors;
  * Для добавления нового формата экспорта необходимо совершить 1 изменение:
  * Создать класс, имплементирующий интерфейс {@link Exporter}, реализовать его
  * методы и аннотировать класс как @Component
+ *
+ * <p>Ошибки в проекте</p>
+ * <ol>
+ * <li>Коллективная безответственность: импорт не должен выводить информацию в
+ * консоль. Взаимодействие с пользователем должен реализовывать класс ConsoleApp</li>
+ * <li>Нарушен принцип DIP: ConsoleApp зависит от низкоуровневых реализаций экспорта.
+ * Решение: создать интерфейс Exporter</li>
+ * <li>Но если создать Exporter тогда нарушим SRP в ConsoleApp, так как он теперь отвечать
+ * ещё и за управление экспортёрами. Решение: выделить задачу экспорта в отдельный
+ * сервис {@link ExportService}</li>
+ * <li>В DocumentService нарушен SRP: сервис должен отвечать за взаимодействие с
+ * документами, но никак не за из импорт. Решение: создать {@link ImportService} и
+ * взаимодействовать с ним через ConsoleApp</li>
+ * <li>Размазанная ответственность и нарушение SRP: ConsoleApp не должен заниматься
+ * формированием пути экспорта. Решение: этим занимается ExportService. Он же возвращает
+ * путь, куда он экспортировал файл.</li>
+ * </ol>
  */
 @SpringBootApplication
 public class ConsoleApp implements CommandLineRunner {
     /**
-     * Директория для экспортируемых файлов
-     */
-    public static final Path OUTPUT_DIR = Path.of(
-            System.getProperty("user.home"), "lessonSOLID");
-
-    /**
      * Сервис для управления документами
      */
     private final DocumentService documentService;
+
+    /**
+     * Сервис импорта файлов
+     */
+    private final ImportService importService = new ImportService();
+
+    /**
+     * Сервис экспорта файлов
+     */
+    private final ExportService exportService;
 
     /**
      * Сканер консольного ввода
@@ -45,18 +65,12 @@ public class ConsoleApp implements CommandLineRunner {
     private final Scanner scanner = new Scanner(System.in);
 
     /**
-     * Экспортёры файлов
+     * Конструктор
      */
-    private final Map<String, Exporter> exporters;
-
     @Autowired
-    public ConsoleApp(DocumentService documentService, List<Exporter> exporters) {
+    public ConsoleApp(DocumentService documentService, ExportService exportService) {
         this.documentService = documentService;
-        this.exporters = exporters.stream()
-                .collect(Collectors.toMap(
-                        Exporter::getSupportableFormat,
-                        Function.identity()
-                ));
+        this.exportService = exportService;
     }
 
     /**
@@ -110,7 +124,7 @@ public class ConsoleApp implements CommandLineRunner {
             content.append(line).append(System.lineSeparator());
         }
 
-        documentService.saveDocument(new Document(name, content.toString()));
+        documentService.add(new Document(name, content.toString()));
         System.out.println("Документ создан и сохранён в памяти.");
     }
 
@@ -121,9 +135,9 @@ public class ConsoleApp implements CommandLineRunner {
         System.out.print("Введите путь к txt файлу: ");
         String pathStr = scanner.nextLine();
         Path path = Path.of(pathStr);
-
         try {
-            documentService.importTxt(path);
+            Document document = importService.importTxt(path);
+            documentService.add(document);
             System.out.println("Документ импортирован: " + path.getFileName());
         } catch (IOException e) {
             System.out.println("Ошибка импорта: " + e.getMessage());
@@ -149,12 +163,6 @@ public class ConsoleApp implements CommandLineRunner {
     /**
      * Выполняет экспорт документа в выходную директорию. Для этого запрашивает у
      * пользователя номер документа и желаемый формат экспорта.
-     * <p>Логическая ошибки</p>
-     * <li>Неправильный JavaDOC</li>
-     * <li>Жёсткая завязка на реализацию - нарушение DIP - применяем интерфейс в
-     * точке расширения, тем самым соблюдая OCP</li>
-     * <li>Размазанная ответственность - лишь метод экспорта на 100% знает, куда он
-     * экспортировал файл</li>
      */
     private void exportDocument() {
         System.out.print("Введите номер документа: ");
@@ -166,28 +174,16 @@ public class ConsoleApp implements CommandLineRunner {
             return;
         }
 
-        String supportableFormats = String.join("/", exporters.keySet());
-        System.out.printf("Введите формат (%s):", supportableFormats);
+        Set<String> supportableFormats = exportService.getSupportableFormats();
+        System.out.printf("Введите формат (%s):", String.join("/", supportableFormats));
+        Document document = documentOptional.get();
         String format = scanner.nextLine().trim().toLowerCase();
 
         try {
-            Files.createDirectories(OUTPUT_DIR);
-        } catch (IOException e) {
-            System.out.println("Ошибка создания директории: " + e);
-            return;
-        }
-
-        Document document = documentOptional.get();
-        try {
-            Exporter exporter = exporters.get(format);
-            if(exporter == null) {
-                System.out.println("Неверный формат");
-                return;
-            }
-            Path outputPath = exporter.export(OUTPUT_DIR, document);
+            Path outputPath = exportService.exportDocument(document, format);
             System.out.println("Экспорт выполнен: " + outputPath);
-        } catch (IOException | DocumentException e) {
-            System.out.println("Ошибка экспорта: " + e.getMessage());
+        } catch (ExportException e) {
+            System.out.println(e.getMessage());
         }
     }
 }

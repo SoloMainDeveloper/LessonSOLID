@@ -2,9 +2,6 @@ package ru.urfu.document;
 
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -19,24 +16,8 @@ public class DocumentService {
     private final List<Document> documents = new ArrayList<>();
 
     /**
-     * Импортирует текстовый файл и добавляет его как документ в память.
-     * <p>Логическая ошибка: неуместный вывод в консоль. Это не задача данного метода</p>
-     *
-     * @param path путь к txt файлу
-     * @throws IOException если файл не найден или не удаётся прочитать
-     */
-    public void importTxt(Path path) throws IOException {
-        if (!Files.exists(path)) {
-            throw new IOException("Файл не найден: " + path);
-        }
-
-        String content = Files.readString(path);
-        documents.add(new Document(path.getFileName().toString(), content));
-    }
-
-    /**
      * Возвращает список всех импортированных документов.
-     * <p>Логическая ошибка: неправильное наименование метода</p>
+     * <p>Ошибка: неправильное наименование метода</p>
      */
     public List<Document> getDocumentList() {
         return Collections.unmodifiableList(documents);
@@ -44,26 +25,22 @@ public class DocumentService {
 
     /**
      * Возвращает документ по индексу.
-     *
-     * <p>Логическая ошибка: излишняя проверка на границы List, так как в самом методе
-     * get происходит данная проверка</p>
-     *
      * @param index индекс документа
      * @return Optional с документом или пустой Optional, если индекс неверен
      */
     public Optional<Document> getDocument(int index) {
-        try {
-            return Optional.of(documents.get(index));
-        } catch(IndexOutOfBoundsException e) {
+        if (index < 0 || index >= documents.size()) {
             return Optional.empty();
         }
+        return Optional.of(documents.get(index));
     }
 
     /**
-     * Сохраняет документ в памяти.
-     * Логическая ошибка: перегруз по функционалу, нарушен SRP
+     * Добавляет документ в список документов.
+     * Логическая ошибка: перегруз по функционалу. Метод должен отвечать только за
+     * добавление, но не за создание документа.
      */
-    public void saveDocument(Document document) {
+    public void add(Document document) {
         documents.add(document);
     }
 
